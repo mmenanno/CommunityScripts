@@ -2,7 +2,7 @@ name: Deploy repository to Github Pages
 
 on:
   push:
-    branches: [main, stable]
+    branches: [main, stable, add-scene-file-organizer]
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
@@ -30,8 +30,7 @@ jobs:
         uses: actions/checkout@v2
         with:
           path: dev
-          # change this ref to whatever dev branch/tag we need when necessary
-          ref: main
+          ref: add-scene-file-organizer
           fetch-depth: "0"
       - run: |
           cd dev

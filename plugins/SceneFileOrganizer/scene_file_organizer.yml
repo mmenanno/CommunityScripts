@@ -1,0 +1,42 @@
+name: SceneFileOrganizer
+description: Rename and organize scene files based on configurable templates using studio hierarchy, performers, tags, and more.
+version: 1.0.0
+url: https://github.com/stashapp/CommunityScripts
+
+exec:
+  - python
+  - "{pluginDir}/scene_file_organizer.py"
+
+interface: raw
+
+settings:
+  enabled:
+    displayName: Enabled
+    description: Enable the automatic hook for renaming on scene update.
+    type: BOOLEAN
+  dry_run:
+    displayName: Dry Run
+    description: Preview changes in logs without moving files.
+    type: BOOLEAN
+
+hooks:
+  - name: scene_organize_hook
+    description: Renames/moves scene files when a scene is updated and marked organized.
+    triggeredBy:
+      - Scene.Update.Post
+
+tasks:
+  - name: "Generate Default Config"
+    description: Create config.yaml with documented defaults if it does not exist yet.
+    defaultArgs:
+      mode: generate_config
+  - name: "Rename All Scenes"
+    description: Process all scenes against current templates. Respects dry-run setting.
+    defaultArgs:
+      mode: bulk
+  - name: "Backfill Organized Scenes"
+    description: >
+      Check all organized scenes and move misplaced files.
+      Enable dry-run first to preview changes.
+    defaultArgs:
+      mode: backfill
