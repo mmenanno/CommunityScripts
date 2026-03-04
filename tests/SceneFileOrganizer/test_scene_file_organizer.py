@@ -107,8 +107,8 @@ class TestHookGuards:
             mock_log.info.assert_not_called()
 
     @patch("scene_file_organizer.is_enabled", return_value=True)
-    def test_hook_skips_when_not_organized(self, mock_enabled, mock_server_connection):
-        """Hook should return early when 'organized' is not in inputFields."""
+    def test_hook_skips_when_irrelevant_field_updated(self, mock_enabled, mock_server_connection):
+        """Hook should return early when only irrelevant fields are in inputFields."""
         mock_stash = MagicMock()
         json_input = {
             "server_connection": mock_server_connection,
@@ -116,8 +116,8 @@ class TestHookGuards:
                 "hookContext": {
                     "id": 42,
                     "type": "Scene.Update.Post",
-                    "input": {"title": "New Title", "id": 42},
-                    "inputFields": ["title", "id"],
+                    "input": {"details": "Some notes", "id": 42},
+                    "inputFields": ["details", "id"],
                 }
             },
         }
@@ -924,6 +924,108 @@ class TestHandleHookCallsProcessScene:
         mock_process.assert_called_once_with(
             mock_stash, 42, mock_config, ["/media/videos"], False, "v0.28.0"
         )
+
+    @patch("scene_file_organizer.fetch_scene")
+    @patch("scene_file_organizer.fetch_library_paths", return_value=["/media/videos"])
+    @patch("scene_file_organizer.process_scene", return_value=True)
+    @patch("scene_file_organizer.is_dry_run", return_value=False)
+    @patch("scene_file_organizer.load_config")
+    @patch("scene_file_organizer.is_enabled", return_value=True)
+    def test_hook_processes_metadata_change_on_organized_scene(
+        self, mock_enabled, mock_load_config, mock_dry_run,
+        mock_process, mock_fetch_libs, mock_fetch_scene, mock_server_connection,
+    ):
+        """Metadata change on organized scene triggers process_scene with scene_data."""
+        mock_stash = _make_mock_stash("0.28.0")
+        mock_config = MagicMock()
+        mock_load_config.return_value = mock_config
+        scene_data = {"id": "42", "organized": True}
+        mock_fetch_scene.return_value = scene_data
+
+        json_input = {
+            "server_connection": mock_server_connection,
+            "args": {
+                "hookContext": {
+                    "id": 42,
+                    "type": "Scene.Update.Post",
+                    "input": {"studio_id": "5", "id": 42},
+                    "inputFields": ["studio_id", "id"],
+                }
+            },
+        }
+
+        sfo.handle_hook(mock_stash, json_input)
+
+        mock_fetch_scene.assert_called_once_with(mock_stash, 42, "v0.28.0")
+        mock_process.assert_called_once_with(
+            mock_stash, 42, mock_config, ["/media/videos"], False,
+            "v0.28.0", scene_data=scene_data,
+        )
+
+    @patch("scene_file_organizer.fetch_scene")
+    @patch("scene_file_organizer.is_enabled", return_value=True)
+    def test_hook_skips_metadata_change_on_unorganized_scene(
+        self, mock_enabled, mock_fetch_scene, mock_server_connection,
+    ):
+        """Metadata change on unorganized scene does not trigger process_scene."""
+        mock_stash = _make_mock_stash("0.28.0")
+        scene_data = {"id": "42", "organized": False}
+        mock_fetch_scene.return_value = scene_data
+
+        json_input = {
+            "server_connection": mock_server_connection,
+            "args": {
+                "hookContext": {
+                    "id": 42,
+                    "type": "Scene.Update.Post",
+                    "input": {"title": "New Title", "id": 42},
+                    "inputFields": ["title", "id"],
+                }
+            },
+        }
+
+        with patch("scene_file_organizer.load_config") as mock_load_config, \
+             patch("scene_file_organizer.is_dry_run", return_value=False), \
+             patch("scene_file_organizer.fetch_library_paths", return_value=["/media"]), \
+             patch("scene_file_organizer.process_scene") as mock_process:
+            mock_load_config.return_value = MagicMock()
+            sfo.handle_hook(mock_stash, json_input)
+            mock_process.assert_not_called()
+
+    @patch("scene_file_organizer.fetch_library_paths", return_value=["/media/videos"])
+    @patch("scene_file_organizer.process_scene", return_value=True)
+    @patch("scene_file_organizer.is_dry_run", return_value=False)
+    @patch("scene_file_organizer.load_config")
+    @patch("scene_file_organizer.is_enabled", return_value=True)
+    def test_hook_organizing_takes_priority(
+        self, mock_enabled, mock_load_config, mock_dry_run,
+        mock_process, mock_fetch_libs, mock_server_connection,
+    ):
+        """When organized=True and a relevant field both present, Case 1 path (no pre-fetch)."""
+        mock_stash = _make_mock_stash("0.28.0")
+        mock_config = MagicMock()
+        mock_load_config.return_value = mock_config
+
+        json_input = {
+            "server_connection": mock_server_connection,
+            "args": {
+                "hookContext": {
+                    "id": 42,
+                    "type": "Scene.Update.Post",
+                    "input": {"organized": True, "studio_id": "5", "id": 42},
+                    "inputFields": ["organized", "studio_id", "id"],
+                }
+            },
+        }
+
+        with patch("scene_file_organizer.fetch_scene") as mock_fetch_scene:
+            sfo.handle_hook(mock_stash, json_input)
+            # Case 1 path: no pre-fetch needed
+            mock_fetch_scene.assert_not_called()
+            # process_scene called without scene_data
+            mock_process.assert_called_once_with(
+                mock_stash, 42, mock_config, ["/media/videos"], False, "v0.28.0"
+            )
 
 
 # ---------------------------------------------------------------------------

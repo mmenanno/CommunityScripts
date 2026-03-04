@@ -71,6 +71,14 @@ from template_engine import select_filename_template, select_path_template
 
 PLUGIN_ID = "scene_file_organizer"
 
+# Fields that affect the computed filename/path.  When any of these change
+# on an already-organized scene, the hook re-processes the scene so the file
+# moves to match the updated metadata.
+RENAME_RELEVANT_FIELDS = frozenset({
+    "title", "date", "code",
+    "studio_id", "performer_ids", "tag_ids",
+})
+
 # Module-level plugin directory, set in main() for use by task handlers
 # that don't receive json_input (bulk_rename, backfill).
 _plugin_dir = ""
@@ -541,14 +549,19 @@ def _describe_template_match(template, scene_tags, scene_studio, config, kind):
 
 
 def handle_hook(stash: StashInterface, json_input: dict):
-    """Handle Scene.Update.Post hook with safety guards.
+    """Handle Scene.Update.Post hook with two trigger cases.
 
-    Five early-exit guards prevent unnecessary processing:
+    Case 1 (organize): ``organized`` is in inputFields AND set to True.
+        Process unconditionally (scene is being marked organized).
+
+    Case 2 (metadata change): any RENAME_RELEVANT_FIELDS in inputFields.
+        Fetch scene first; only process if it is already organized.
+
+    Shared early-exit guards:
     1. Plugin must be enabled
     2. hookContext must exist in args
-    3. 'organized' must be in inputFields (only process organize events)
-    4. organized must be set to True (not False)
-    5. scene_id must be present
+    3. scene_id must be present
+    4. At least one trigger case must match
     """
     # Guard 1: Check if enabled
     if not is_enabled(stash):
@@ -559,19 +572,24 @@ def handle_hook(stash: StashInterface, json_input: dict):
     if not hook_context:
         return
 
-    # Guard 3: Check that 'organized' field was in the update
-    input_fields = hook_context.get("inputFields", [])
-    if "organized" not in input_fields:
-        return
-
-    # Guard 4: Check that organized is being set to True
-    hook_input = hook_context.get("input", {})
-    if not hook_input.get("organized", False):
-        return
-
-    # Guard 5: Extract scene ID
+    # Guard 3: Extract scene ID
     scene_id = hook_context.get("id")
     if not scene_id:
+        return
+
+    # Determine trigger case
+    input_fields = hook_context.get("inputFields", [])
+    hook_input = hook_context.get("input", {})
+
+    is_organizing = (
+        "organized" in input_fields and hook_input.get("organized", False)
+    )
+    has_relevant_fields = bool(
+        RENAME_RELEVANT_FIELDS.intersection(input_fields)
+    )
+
+    # Guard 4: At least one trigger must match
+    if not is_organizing and not has_relevant_fields:
         return
 
     # Load config (after all guards pass)
@@ -592,10 +610,19 @@ def handle_hook(stash: StashInterface, json_input: dict):
     # Check dry-run mode
     dry_run = is_dry_run(stash)
 
-    # Process the scene
-    process_scene(
-        stash, int(scene_id), config, library_paths, dry_run, version_str
-    )
+    if is_organizing:
+        # Case 1: Scene is being organized — process unconditionally
+        process_scene(
+            stash, int(scene_id), config, library_paths, dry_run, version_str
+        )
+    else:
+        # Case 2: Metadata changed — only process if already organized
+        scene = fetch_scene(stash, int(scene_id), version_str)
+        if scene and scene.get("organized", False):
+            process_scene(
+                stash, int(scene_id), config, library_paths, dry_run,
+                version_str, scene_data=scene,
+            )
 
 
 def main():

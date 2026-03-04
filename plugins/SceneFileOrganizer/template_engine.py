@@ -1,18 +1,20 @@
 """Template engine for SceneFileOrganizer.
 
 Provides priority-based template selection (tag > studio > path-match > default)
-for both filename and path templates, plus two-pass template rendering with
-group expansion and variable substitution.
+for both filename and path templates, plus three-pass template rendering with
+group expansion, variable substitution, and empty delimiter cleanup.
 
 Template selection accepts Config sub-dataclasses (FilenameConfig, PathConfig),
 not the full Config object, for explicit dependency and testability.
 
-Template rendering uses a two-pass approach:
+Template rendering uses a three-pass approach:
   Pass 1 (expand_groups): Expand {$var text} conditional groups
   Pass 2 (substitute_variables): Replace $variable placeholders
+  Pass 3 (clean_empty_delimiters): Remove empty [] and () left behind
 
 This ordering prevents the delimiter-leaking bug (Issue #101) from the
-predecessor renamerOnUpdate plugin.
+predecessor renamerOnUpdate plugin, and cleans up empty bracket/paren pairs
+when variables outside groups resolve to empty strings.
 """
 
 import re
@@ -32,6 +34,15 @@ VAR_PATTERN = re.compile(r"\$([a-z_][a-z0-9_]*)")
 # Matches {content} where content does not contain nested }.
 # [^}]* stops at the first closing brace (no nesting support by design).
 GROUP_PATTERN = re.compile(r"\{([^}]*)\}")
+
+# Matches empty bracket/paren pairs (with optional internal whitespace).
+# Used in Pass 3 to clean up delimiters left behind when variables resolve
+# to empty strings outside of conditional groups.
+EMPTY_DELIMITERS_RE = re.compile(r"\[\s*\]|\(\s*\)")
+
+# Matches runs of two or more whitespace characters, used to collapse
+# gaps left after removing empty delimiter pairs.
+MULTI_WHITESPACE_RE = re.compile(r"\s{2,}")
 
 
 # =============================================================================
@@ -90,13 +101,32 @@ def expand_groups(template: str, variables: dict) -> str:
     return GROUP_PATTERN.sub(_replace_group, template)
 
 
+def clean_empty_delimiters(text: str) -> str:
+    """Remove empty bracket/paren pairs and collapse resulting whitespace.
+
+    Handles ``[]``, ``[ ]``, ``()``, ``( )`` left behind when variables
+    outside conditional groups resolve to empty strings.
+
+    Args:
+        text: Rendered template string that may contain empty delimiters.
+
+    Returns:
+        Cleaned string with empty delimiters removed and whitespace normalized.
+    """
+    text = EMPTY_DELIMITERS_RE.sub("", text)
+    text = MULTI_WHITESPACE_RE.sub(" ", text)
+    return text.strip()
+
+
 def render_template(template: str, variables: dict) -> str:
-    """Render a template string with two-pass processing.
+    """Render a template string with three-pass processing.
 
     Pass 1: Expand {$var text} groups (removes groups with empty variables).
     Pass 2: Substitute remaining $variable placeholders outside groups.
+    Pass 3: Clean empty delimiter pairs ([], ()) left by empty variables.
 
-    This ordering prevents the delimiter-leaking bug (Issue #101).
+    This ordering prevents the delimiter-leaking bug (Issue #101) and
+    ensures clean filenames when variables resolve to empty strings.
 
     Args:
         template: Template string with $variables and optional {groups}.
@@ -107,6 +137,7 @@ def render_template(template: str, variables: dict) -> str:
     """
     result = expand_groups(template, variables)
     result = substitute_variables(result, variables)
+    result = clean_empty_delimiters(result)
     return result
 
 

@@ -8,7 +8,7 @@ SceneFileOrganizer is a [Stash](https://stashapp.cc/) plugin that automatically 
 
 ## How It Works
 
-1. You mark a scene as **Organized** in the Stash UI.
+1. You mark a scene as **Organized** in the Stash UI, or update metadata (title, studio, performers, etc.) on an already-organized scene.
 2. The plugin's hook fires on `Scene.Update.Post`.
 3. The plugin fetches scene metadata (title, date, performers, studio, tags, etc.), selects a filename and path template based on priority rules, renders the templates, and moves the file to its new location via the Stash GraphQL API.
 
@@ -61,13 +61,18 @@ On first run (when no `config.yaml` exists), the plugin generates a fully-commen
 
 ### Hook Mode (Automatic)
 
-The primary mode. Triggers automatically on `Scene.Update.Post` when a scene is marked organized. The plugin applies five safety guards before processing:
+The primary mode. Triggers automatically on `Scene.Update.Post` in two cases:
+
+**Case 1 — Organizing:** A scene is marked as organized (`organized` set to `true`). The plugin processes unconditionally.
+
+**Case 2 — Metadata change:** A rename-relevant field (`title`, `date`, `code`, `studio_id`, `performer_ids`, or `tag_ids`) is updated on an already-organized scene. The plugin fetches the scene, confirms it is organized, and re-processes it so the file moves to match the updated metadata.
+
+The plugin applies four shared safety guards before processing:
 
 1. Plugin must be **enabled** (via Enable task button)
 2. A `hookContext` must exist in the event arguments
-3. The `organized` field must be in the update's input fields
-4. `organized` must be set to **true** (not false)
-5. A `scene_id` must be present
+3. A `scene_id` must be present
+4. At least one trigger case must match (organizing or rename-relevant field change)
 
 If all guards pass, the plugin processes the scene through the full rename/move pipeline.
 
@@ -103,7 +108,7 @@ When a scene is processed (by hook, bulk, or backfill), the plugin follows this 
 3. **Extract metadata** -- build 25+ template variables from scene data (title, date, performers, studio, tags, technical info, etc.)
 4. **Select templates** -- choose filename and path templates by priority: tag > studio > [path-match] > default
 5. **Apply tag modifiers** -- per-tag overrides (inverse performer names, per-tag dry-run)
-6. **Render templates** -- substitute variables, expand conditional groups
+6. **Render templates** -- substitute variables, expand conditional groups, clean empty delimiters
 7. **Apply text processing** -- sanitize filenames, apply casing, character replacement, ASCII transliteration
 8. **Resolve duplicates** -- check for filename collisions and append suffixes if needed
 9. **Move video file** via Stash GraphQL `MoveFiles` mutation
@@ -137,6 +142,8 @@ Curly braces define **conditional groups**: `{$var text}`. If ANY `$variable` in
 - With no date and title "Second Ring": produces `Second Ring` (the entire `{$date - }` group is removed)
 
 This is the recommended way to handle optional variables without leaving stray separators in filenames.
+
+**Note:** Variables outside groups that resolve to empty strings will leave behind any surrounding brackets or parentheses. The template engine automatically cleans these up: `[$studio] $title` with an empty studio produces `Title` (the empty `[]` is removed and whitespace is collapsed). Group syntax is still preferred for complex cases with custom separators.
 
 ### Special Path Tokens
 
@@ -644,7 +651,7 @@ The template priority chain (tag > studio > path-match > default) may have match
 **Cause: Variable is empty, causing missing parts**
 A template variable resolved to an empty string, leaving gaps or stray separators in the output.
 
-- **Solution:** Check dry-run log for `Variables:` which shows all resolved variable values. Use group syntax `{$var text}` to gracefully handle empty variables -- the entire group is removed when any variable inside is empty.
+- **Solution:** Check dry-run log for `Variables:` which shows all resolved variable values. Empty bracket/paren pairs like `[]` and `()` are automatically cleaned up. For custom separators or more complex cases, use group syntax `{$var text}` -- the entire group is removed when any variable inside is empty.
 
 **Cause: Text processing removing unexpected characters**
 The `text.remove_chars` setting (default: `",#"`) removes certain characters from all generated text. The `text.space_char` setting may replace spaces.
@@ -708,7 +715,7 @@ macOS stores filenames in NFD form while Linux uses NFC. The plugin uses NFC nor
 - **Tag templates with `!1.` prefix** sort to the top in the Stash UI tag list, making them easy to apply as workflow triggers.
 - **The `clean_tag` modifier** lets you use tags as one-shot workflow triggers that auto-remove after processing. Apply tag, mark organized, tag disappears.
 - **Keep `general.bulk_delay` at 1+ seconds** for large libraries to avoid database locking during bulk rename or backfill operations.
-- **Use group syntax `{$var text}`** for optional variables. The entire group is removed if any variable inside is empty, preventing stray separators or brackets.
+- **Use group syntax `{$var text}`** for optional variables with custom separators. The entire group is removed if any variable inside is empty. Simple bracket/paren pairs like `[$studio]` are cleaned up automatically when the variable is empty.
 - **Use `$studio_hierarchy` in path templates** for automatic nested folder structures that follow the studio's parent chain.
 - **Set `performers.sort` to `"name"`** for predictable alphabetical ordering of performer names in filenames.
 

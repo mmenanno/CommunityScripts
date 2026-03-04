@@ -21,7 +21,7 @@ settings:
 
 hooks:
   - name: scene_organize_hook
-    description: Renames/moves scene files when a scene is updated and marked organized.
+    description: Renames/moves scene files when a scene is marked organized or when metadata changes on an already-organized scene.
     triggeredBy:
       - Scene.Update.Post
 

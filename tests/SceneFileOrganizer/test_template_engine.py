@@ -178,8 +178,60 @@ class TestExpandGroups:
 # =============================================================================
 
 
+class TestCleanEmptyDelimiters:
+    """Tests for clean_empty_delimiters() - removes empty [] and () pairs."""
+
+    def test_empty_brackets_removed(self):
+        """Empty [] is removed."""
+        from template_engine import clean_empty_delimiters
+
+        assert clean_empty_delimiters("[] Title") == "Title"
+
+    def test_empty_parens_removed(self):
+        """Empty () is removed."""
+        from template_engine import clean_empty_delimiters
+
+        assert clean_empty_delimiters("() Title") == "Title"
+
+    def test_empty_brackets_with_space_removed(self):
+        """[ ] (with internal space) is removed."""
+        from template_engine import clean_empty_delimiters
+
+        assert clean_empty_delimiters("[ ] Title") == "Title"
+
+    def test_empty_parens_with_space_removed(self):
+        """( ) (with internal space) is removed."""
+        from template_engine import clean_empty_delimiters
+
+        assert clean_empty_delimiters("( ) Title") == "Title"
+
+    def test_multiple_empty_pairs_removed(self):
+        """Multiple empty pairs removed and whitespace collapsed."""
+        from template_engine import clean_empty_delimiters
+
+        assert clean_empty_delimiters("[] () Title") == "Title"
+
+    def test_non_empty_brackets_preserved(self):
+        """Non-empty [Deeper] is preserved."""
+        from template_engine import clean_empty_delimiters
+
+        assert clean_empty_delimiters("[Deeper] Title") == "[Deeper] Title"
+
+    def test_adjacent_empty_brackets(self):
+        """Adjacent []Title → Title (no extra space)."""
+        from template_engine import clean_empty_delimiters
+
+        assert clean_empty_delimiters("[]Title") == "Title"
+
+    def test_empty_string_passthrough(self):
+        """Empty string returns empty string."""
+        from template_engine import clean_empty_delimiters
+
+        assert clean_empty_delimiters("") == ""
+
+
 class TestRenderTemplate:
-    """Tests for render_template() - two-pass rendering: groups first, then substitution."""
+    """Tests for render_template() - three-pass rendering: groups, substitution, cleanup."""
 
     def test_two_pass_order(self):
         """Groups are expanded first, then remaining variables are substituted."""
@@ -237,6 +289,38 @@ class TestRenderTemplate:
 
         result = render_template("plain text", {})
         assert result == "plain text"
+
+    def test_empty_studio_brackets_cleaned(self):
+        """[$studio] $title with empty studio produces clean 'Title' (no [])."""
+        from template_engine import render_template
+
+        result = render_template("[$studio] $title", {"studio": "", "title": "Title"})
+        assert result == "Title"
+
+    def test_empty_date_parens_cleaned(self):
+        """($date) $title with empty date produces clean 'Title' (no ())."""
+        from template_engine import render_template
+
+        result = render_template("($date) $title", {"date": "", "title": "Title"})
+        assert result == "Title"
+
+    def test_multiple_empty_delimiters_cleaned(self):
+        """[$studio] ($date) $title with both empty produces clean 'Title'."""
+        from template_engine import render_template
+
+        result = render_template(
+            "[$studio] ($date) $title", {"studio": "", "date": "", "title": "Title"}
+        )
+        assert result == "Title"
+
+    def test_non_empty_brackets_preserved_in_render(self):
+        """[$studio] $title with studio='Deeper' produces '[Deeper] Title'."""
+        from template_engine import render_template
+
+        result = render_template(
+            "[$studio] $title", {"studio": "Deeper", "title": "Title"}
+        )
+        assert result == "[Deeper] Title"
 
 
 # =============================================================================
